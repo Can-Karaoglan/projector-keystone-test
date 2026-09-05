@@ -1,25 +1,62 @@
 import cv2
 import numpy as np
+import usb.core
+import usb.util
 
-def find_working_camera():
-    # Android üzerindeki yerel HTTP/RTSP akış adresleri test edilir
-    stream_urls = [
-        "http://127.0.0.1:8080/mjpeg", 
-        "rtsp://127.0.0.1:8554/live",
-        0 # Klasik dahili indeks yedek olarak tutulur
-    ]
-    
-    for source in stream_urls:
+def initialize_usb_camera():
+    """
+    Finds a UVC-compliant USB camera using PyUSB, detaches kernel drivers if active,
+    and sets up the device and its input endpoint for raw packet reading.
+    """
+    dev = usb.core.find(idVendor=0x045e) # Microsoft VX-1000 Vendor ID
+    if dev is None:
+        dev = usb.core.find(find_all=False)
+        
+    if dev is None:
+        return None, None
+
+    try:
+        if dev.is_kernel_driver_active(0):
+            dev.detach_kernel_driver(0)
+    except Exception:
+        pass
+
+    dev.set_configuration()
+    cfg = dev.get_active_configuration()
+    intf = cfg[(0, 0)]
+
+    ep_in = None
+    for ep in intf:
+        if usb.util.endpoint_direction(ep.bEndpointAddress) == usb.util.ENDPOINT_IN:
+            ep_in = ep
+            break
+
+    return dev, ep_in
+
+def get_usb_camera_frame(dev, ep_in):
+    """
+    Reads raw USB packets, strips UVC headers, isolates MJPEG frames,
+    and decodes them into OpenCV-compatible numpy arrays.
+    """
+    buffer = bytearray()
+    while True:
         try:
-            cap = cv2.VideoCapture(source)
-            if cap.isOpened():
-                ret, frame = cap.read()
-                if ret and frame is not None:
-                    cap.release()
-                    return source
-            cap.release()
-        except Exception:
-            continue
+            data = dev.read(ep_in.bEndpointAddress, ep_in.wMaxPacketSize, timeout=100)
+            buffer.extend(data)
+            
+            start = buffer.find(b'\xff\xd8')
+            end = buffer.find(b'\xff\xd9')
+            
+            if start != -1 and end != -1 and end > start:
+                jpg_data = buffer[start:end+2]
+                del buffer[:end+2]
+                
+                frame_arr = np.frombuffer(jpg_data, dtype=np.uint8)
+                frame = cv2.imdecode(frame_arr, cv2.IMREAD_COLOR)
+                if frame is not None:
+                    return frame
+        except usb.core.USBError:
+            break
     return None
 
 def draw_grid_and_markers(frame, h, w, show_full_grid=True):
@@ -27,27 +64,24 @@ def draw_grid_and_markers(frame, h, w, show_full_grid=True):
     Draws non-intrusive calibration shapes, corners, center markers, 
     and a subtle grid pattern onto the frame without disrupting media playback.
     """
-    # Subtle background grid pattern lines
     if show_full_grid:
-        grid_color = (40, 120, 40) # Faint green grid lines
+        grid_color = (40, 120, 40)
         for x in range(0, w, 80):
             cv2.line(frame, (x, 0), (x, h), grid_color, 1)
         for y in range(0, h, 60):
             cv2.line(frame, (0, y), (w, y), grid_color, 1)
 
-    # Precise corner dots for perspective transformation matrix mapping
     corner_color = (0, 255, 0)
     cv2.circle(frame, (40, 40), 8, corner_color, -1)
     cv2.circle(frame, (w - 40, 40), 8, corner_color, -1)
     cv2.circle(frame, (40, h - 40), 8, corner_color, -1)
     cv2.circle(frame, (w - 40, h - 40), 8, corner_color, -1)
 
-    # Edge and center reference markers to assist optical detection
-    cv2.circle(frame, (w // 2, 40), 6, (255, 0, 0), -1)     # Top edge center
-    cv2.circle(frame, (w // 2, h - 40), 6, (255, 0, 0), -1)  # Bottom edge center
-    cv2.circle(frame, (40, h // 2), 6, (255, 0, 0), -1)     # Left edge center
-    cv2.circle(frame, (w - 40, h // 2), 6, (255, 0, 0), -1)  # Right edge center
-    cv2.circle(frame, (w // 2, h // 2), 10, (0, 0, 255), -1) # Absolute center anchor
+    cv2.circle(frame, (w // 2, 40), 6, (255, 0, 0), -1)
+    cv2.circle(frame, (w // 2, h - 40), 6, (255, 0, 0), -1)
+    cv2.circle(frame, (40, h // 2), 6, (255, 0, 0), -1)
+    cv2.circle(frame, (w - 40, h // 2), 6, (255, 0, 0), -1)
+    cv2.circle(frame, (w // 2, h // 2), 10, (0, 0, 255), -1)
 
 def detect_calibration_markers(frame):
     """
@@ -71,33 +105,30 @@ def detect_calibration_markers(frame):
                 points.append((cX, cY))
                 
     if len(points) >= 4:
-        # Sort points to extract the 4 outermost corners accurately
         points = np.array(points, dtype="float32")
         s = points.sum(axis=1)
         rect = np.zeros((4, 2), dtype="float32")
-        rect[0] = points[np.argmin(s)]     # Top-Left
-        rect[3] = points[np.argmax(s)]     # Bottom-Right
+        rect[0] = points[np.argmin(s)]
+        rect[3] = points[np.argmax(s)]
         
         diff = np.diff(points, axis=1)
-        rect[1] = points[np.argmin(diff)]    # Top-Right
-        rect[2] = points[np.argmax(diff)]    # Bottom-Left
+        rect[1] = points[np.argmin(diff)]
+        rect[2] = points[np.argmax(diff)]
         return rect
         
     return None
 
 def main():
-    print("Searching for available camera devices...")
-    cam_index = find_working_camera()
+    print("Searching for available USB camera devices via PyUSB...")
+    dev, ep_in = initialize_usb_camera()
     
-    if cam_index is None:
+    if dev is None or ep_in is None:
         print("NOTIFICATION: Camera could not be detected!")
-        print("Please ensure the camera is properly connected, the USB hub has enough power, or check Termux permissions.")
+        print("Please ensure the camera is properly connected, libusb is installed, and Termux has USB permissions.")
         return
 
-    print(f"Camera successfully found at index: {cam_index}")
-    cap = cv2.VideoCapture(cam_index)
+    print("USB Camera successfully initialized via raw PyUSB layer.")
 
-    # State variables for optimization and smart re-calibration triggers
     is_calibrated = False
     blocked_counter = 0
     prev_gray = None
@@ -106,20 +137,18 @@ def main():
     calibration_cooldown = 0
 
     while True:
-        ret, frame = cap.read()
-        if not ret or frame is None:
-            print("Error: Failed to grab frame from the camera.")
+        frame = get_usb_camera_frame(dev, ep_in)
+        if frame is None:
+            print("Error: Failed to grab frame from the USB device.")
             break
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         h, w = gray.shape
 
-        # 1. Error Management: Check if camera view is obstructed or pitch dark
         avg_brightness = np.mean(gray)
         if avg_brightness < 12:
             blocked_counter += 1
             if blocked_counter > 20:
-                # Non-intrusive bottom/top notification bar warning
                 overlay = frame.copy()
                 cv2.rectangle(overlay, (0, h - 50), (w, h), (0, 0, 0), -1)
                 cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
@@ -133,19 +162,15 @@ def main():
         else:
             blocked_counter = 0
 
-        # 2. Motion & Angle Change Detection (CPU Optimization Trigger)
         motion_detected = False
         if prev_gray is not None:
             diff = cv2.absdiff(prev_gray, gray)
             non_zero_count = np.count_nonzero(diff > 30)
-            if non_zero_count > (w * h * 0.03): # Triggers only on significant physical displacement
+            if non_zero_count > (w * h * 0.03):
                 motion_detected = True
         
         prev_gray = gray.copy()
 
-        # 3. Smart Re-calibration Controller
-        # Only compute expensive perspective matrix transformations upon startup, 
-        # explicit motion detection, or loss of previous alignment.
         if not is_calibrated or motion_detected or cached_perspective_matrix is None:
             if calibration_cooldown == 0:
                 src_pts = detect_calibration_markers(frame)
@@ -160,20 +185,16 @@ def main():
                     
                     cached_perspective_matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
                     is_calibrated = True
-                    calibration_cooldown = 30 # Prevent recalculating every single frame
+                    calibration_cooldown = 30
             else:
                 calibration_cooldown -= 1
 
-        # 4. Rendering & Execution Flow
-        # Draw non-intrusive grid pattern and reference indicators for background tracking
         draw_grid_and_markers(frame, h, w, show_full_grid=True)
 
-        # Apply optimized keystone correction only if calibration cache is valid
         if cached_perspective_matrix is not None:
             warped = cv2.warpPerspective(frame, cached_perspective_matrix, (w, h))
             cv2.imshow("Automated Keystone Correction System", warped)
         else:
-            # Fallback view with notification if screen boundaries cannot be resolved yet
             overlay = frame.copy()
             cv2.rectangle(overlay, (0, 0), (w, 40), (0, 0, 0), -1)
             cv2.addWeighted(overlay, 0.5, frame, 0.5, 0, frame)
@@ -184,7 +205,6 @@ def main():
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-    cap.release()
     cv2.destroyAllWindows()
 
 if __name__ == "__main__":
