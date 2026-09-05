@@ -1,11 +1,29 @@
 import cv2
 import numpy as np
 
+def find_working_camera():
+    # Test indexes from 0 to 5
+    for index in range(6):
+        cap = cv2.VideoCapture(index)
+        if cap.isOpened():
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                cap.release()
+                return index
+            cap.release()
+    return None
+
 def main():
-    cap = cv2.VideoCapture(-1)
-    if not cap.isOpened():
-        print("Error: Camera could not be opened.")
+    print("Searching for available camera devices...")
+    cam_index = find_working_camera()
+    
+    if cam_index is None:
+        print("NOTIFICATION: Camera could not be detected!")
+        print("Please ensure the camera is properly connected, the USB hub has enough power, or check Termux permissions.")
         return
+
+    print(f"Camera successfully found at index: {cam_index}")
+    cap = cv2.VideoCapture(cam_index)
 
     is_calibrated = False
     blocked_counter = 0
@@ -13,14 +31,14 @@ def main():
 
     while True:
         ret, frame = cap.read()
-        if not ret:
-            print("Error: Failed to grab frame.")
+        if not ret or frame is None:
+            print("Error: Failed to grab frame from the camera.")
             break
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         h, w = gray.shape
 
-        # 1. Hata Yönetimi: Kamera engellenmiş mi veya karanlık mı kontrolü
+        # 1. Error Management: Check if camera is blocked or dark
         avg_brightness = np.mean(gray)
         if avg_brightness < 10:
             blocked_counter += 1
@@ -34,24 +52,21 @@ def main():
         else:
             blocked_counter = 0
 
-        # 2. Hareket ve Açı Değişimi Algılama (Motion Trigger)
+        # 2. Motion and Angle Change Detection (Motion Trigger)
         motion_detected = False
         if prev_gray is not None:
             diff = cv2.absdiff(prev_gray, gray)
             non_zero_count = np.count_nonzero(diff > 25)
-            if non_zero_count > (w * h * 0.02):  # Toplam alanın %2'sinden fazla değişim varsa
+            if non_zero_count > (w * h * 0.02):
                 motion_detected = True
         prev_gray = gray.copy()
 
-        # 3. Akıllı Kalibrasyon ve Referans Şekilleri
+        # 3. Smart Calibration and Reference Shapes
         if not is_calibrated or motion_detected:
-            # İzlenen medyaya etki etmeyen köşe referans noktaları (Test için)
             cv2.circle(frame, (40, 40), 6, (0, 255, 0), -1)
             cv2.circle(frame, (w - 40, 40), 6, (0, 255, 0), -1)
             cv2.circle(frame, (40, h - 40), 6, (0, 255, 0), -1)
             cv2.circle(frame, (w - 40, h - 40), 6, (0, 255, 0), -1)
-            
-            # Gerçek projede cv2.warpPerspective entegrasyonu buraya eklenecektir
             is_calibrated = True
 
         cv2.imshow("Projector Keystone Test", frame)
