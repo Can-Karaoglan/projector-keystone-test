@@ -2,19 +2,22 @@ import cv2
 import numpy as np
 
 def find_working_camera():
-    """
-    Safely scans and detects available camera device indices.
-    """
-    indices = [-1, 0, 1, 2, 3, 4, 5]
-    for index in indices:
+    # Android üzerindeki yerel HTTP/RTSP akış adresleri test edilir
+    stream_urls = [
+        "http://127.0.0.1:8080/mjpeg", 
+        "rtsp://127.0.0.1:8554/live",
+        0 # Klasik dahili indeks yedek olarak tutulur
+    ]
+    
+    for source in stream_urls:
         try:
-            cap = cv2.VideoCapture(index)
+            cap = cv2.VideoCapture(source)
             if cap.isOpened():
                 ret, frame = cap.read()
                 if ret and frame is not None:
                     cap.release()
-                    return index
-                cap.release()
+                    return source
+            cap.release()
         except Exception:
             continue
     return None
