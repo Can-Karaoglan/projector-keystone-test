@@ -9,4 +9,4 @@ for cfg in devices:
     print(f"Vendor ID: {hex(cfg.idVendor)}, Product ID: {hex(cfg.idProduct)}")
     
 if not found:
-    print("Cannot detect any USB devices. :/")
+    print("Cannot find any USB devices.")
