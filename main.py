@@ -2,17 +2,20 @@ import cv2
 import numpy as np
 
 def find_working_camera():
-    # Önce -1 (cv2.CAP_ANY) değerini, ardından 0'dan 5'e kadar olan indeksleri test et
-    indices = [-1] + list(range(6))
+    # Negatif indeks (-1) ve 0'dan 5'e kadar olan tüm alternatifleri güvenli tarama
+    indices = [-1, 0, 1, 2, 3, 4, 5]
     
     for index in indices:
-        cap = cv2.VideoCapture(index)
-        if cap.isOpened():
-            ret, frame = cap.read()
-            if ret and frame is not None:
+        try:
+            cap = cv2.VideoCapture(index)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    cap.release()
+                    return index
                 cap.release()
-                return index
-            cap.release()
+        except Exception:
+            continue
     return None
 
 def main():
