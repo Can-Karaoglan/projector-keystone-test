@@ -2,8 +2,10 @@ import cv2
 import numpy as np
 
 def find_working_camera():
-    # Test indexes from 0 to 5
-    for index in range(6):
+    # Önce -1 (cv2.CAP_ANY) değerini, ardından 0'dan 5'e kadar olan indeksleri test et
+    indices = [-1] + list(range(6))
+    
+    for index in indices:
         cap = cv2.VideoCapture(index)
         if cap.isOpened():
             ret, frame = cap.read()
