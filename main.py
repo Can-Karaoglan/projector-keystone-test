@@ -1,20 +1,15 @@
 import cv2
 import numpy as np
-import time
 
 def main():
-    # Initialize camera (UVC webcam)
     cap = cv2.VideoCapture(0)
-    
     if not cap.isOpened():
         print("Error: Camera could not be opened.")
         return
 
-    # States
     is_calibrated = False
-    camera_blocked_counter = 0
-    
-    print("Starting Keystone Correction Test Loop...")
+    blocked_counter = 0
+    prev_gray = None
 
     while True:
         ret, frame = cap.read()
@@ -23,42 +18,44 @@ def main():
             break
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        
-        # 1. Check if camera view is completely dark or blocked
+        h, w = gray.shape
+
+        # 1. Hata Yönetimi: Kamera engellenmiş mi veya karanlık mı kontrolü
         avg_brightness = np.mean(gray)
         if avg_brightness < 10:
-            camera_blocked_counter += 1
-            if camera_blocked_counter > 30:
-                # Show notification overlay for blocked/untracked camera
+            blocked_counter += 1
+            if blocked_counter > 25:
                 cv2.putText(frame, "NOTIFICATION: Camera blocked or screen not detected!", 
-                            (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                            (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             cv2.imshow("Projector Keystone Test", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
             continue
         else:
-            camera_blocked_counter = 0
+            blocked_counter = 0
 
-        # 2. Initial Calibration with Grid Pattern (Simulated state)
-        if not is_calibrated:
-            print("Running initial grid pattern calibration...")
-            # Placeholder for grid detection logic
+        # 2. Hareket ve Açı Değişimi Algılama (Motion Trigger)
+        motion_detected = False
+        if prev_gray is not None:
+            diff = cv2.absdiff(prev_gray, gray)
+            non_zero_count = np.count_nonzero(diff > 25)
+            if non_zero_count > (w * h * 0.02):  # Toplam alanın %2'sinden fazla değişim varsa
+                motion_detected = True
+        prev_gray = gray.copy()
+
+        # 3. Akıllı Kalibrasyon ve Referans Şekilleri
+        if not is_calibrated or motion_detected:
+            # İzlenen medyaya etki etmeyen köşe referans noktaları (Test için)
+            cv2.circle(frame, (40, 40), 6, (0, 255, 0), -1)
+            cv2.circle(frame, (w - 40, 40), 6, (0, 255, 0), -1)
+            cv2.circle(frame, (40, h - 40), 6, (0, 255, 0), -1)
+            cv2.circle(frame, (w - 40, h - 40), 6, (0, 255, 0), -1)
+            
+            # Gerçek projede cv2.warpPerspective entegrasyonu buraya eklenecektir
             is_calibrated = True
-        
-        # 3. Trigger-based dynamic check (Movement, Darkness, or Misalignment)
-        # If motion or perspective change is detected, display subtle non-intrusive shapes on corners/edges
-        
-        # Draw placeholder subtle reference markers on corners for testing
-        h, w, _ = frame.shape
-        cv2.circle(frame, (30, 30), 5, (0, 255, 0), -1)
-        cv2.circle(frame, (w - 30, 30), 5, (0, 255, 0), -1)
-        cv2.circle(frame, (30, h - 30), 5, (0, 255, 0), -1)
-        cv2.circle(frame, (w - 30, h - 30), 5, (0, 255, 0), -1)
 
-        # Show live stream on Termux-X11 display
         cv2.imshow("Projector Keystone Test", frame)
 
-        # Exit loop on 'q' press
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
