@@ -1,71 +1,27 @@
 import cv2
 import numpy as np
-import usb.core
-import usb.util
 
-def initialize_usb_camera():
-    print("Microsoft VX-1000 arayüzleri taranıyor...")
-    dev = usb.core.find(idVendor=0x045e)
+def initialize_opencv_camera():
+    """
+    Initializes the camera using OpenCV VideoCapture with alternative backends,
+    bypassing raw PyUSB permission blocks on Android.
+    """
+    backends = [
+        cv2.CAP_ANY,   # Automatic backend selection
+        cv2.CAP_V4L2,  # Video4Linux2 backend for Linux/Android kernel layers
+    ]
     
-    if dev is None:
-        return None, None
-
-    try:
-        if dev.is_kernel_driver_active(0):
-            dev.detach_kernel_driver(0)
-    except Exception:
-        pass
-
-    try:
-        dev.set_configuration()
-    except Exception:
-        pass
+    for backend in backends:
+        print(f"Trying camera backend: {backend}")
+        cap = cv2.VideoCapture(0, backend)
         
-    cfg = dev.get_active_configuration()
-    
-    # Tüm arayüzleri ve endpoint'leri tarayarak doğru veri kanalını bulalım
-    ep_in = None
-    for intf in cfg:
-        for ep in intf:
-            if usb.util.endpoint_direction(ep.bEndpointAddress) == usb.util.ENDPOINT_IN:
-                # Isochronous veya Bulk endpoint kontrolü
-                ep_in = ep
-                break
-        if ep_in is not None:
-            break
-
-    return dev, ep_in
-
-def get_usb_camera_frame(dev, ep_in):
-    """
-    Reads raw USB packets, strips UVC headers, isolates MJPEG frames,
-    and decodes them into OpenCV-compatible numpy arrays.
-    """
-    buffer = bytearray()
-    while True:
-        try:
-            # Okuma boyutunu endpoint'e göre güvenli alıyoruz
-            packet_size = max(ep_in.wMaxPacketSize, 1024)
-            data = dev.read(ep_in.bEndpointAddress, packet_size, timeout=500)
-            buffer.extend(data)
+        if cap.isOpened():
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                print(f"Camera successfully initialized using backend: {backend}")
+                return cap
+            cap.release()
             
-            start = buffer.find(b'\xff\xd8')
-            end = buffer.find(b'\xff\xd9')
-            
-            if start != -1 and end != -1 and end > start:
-                jpg_data = buffer[start:end+2]
-                del buffer[:end+2]
-                
-                frame_arr = np.frombuffer(jpg_data, dtype=np.uint8)
-                frame = cv2.imdecode(frame_arr, cv2.IMREAD_COLOR)
-                if frame is not None:
-                    return frame
-        except usb.core.USBError as e:
-            # Zaman aşımı veya geçici okuma hatalarında döngüyü kırmadan devam et
-            if e.errno == 110: # ETIMEDOUT
-                continue
-            else:
-                break
     return None
 
 def draw_grid_and_markers(frame, h, w, show_full_grid=True):
@@ -128,15 +84,15 @@ def detect_calibration_markers(frame):
     return None
 
 def main():
-    print("Searching for available USB camera devices via PyUSB...")
-    dev, ep_in = initialize_usb_camera()
+    print("Searching for available camera devices via OpenCV VideoCapture...")
+    cap = initialize_opencv_camera()
     
-    if dev is None or ep_in is None:
-        print("NOTIFICATION: Camera could not be detected!")
-        print("Please ensure the camera is properly connected, libusb is installed, and Termux has USB permissions.")
+    if cap is None:
+        print("NOTIFICATION: Camera could not be detected via OpenCV!")
+        print("Please ensure the camera is properly connected and recognized by the system.")
         return
 
-    print("USB Camera successfully initialized via raw PyUSB layer.")
+    print("Camera successfully initialized via OpenCV layer.")
 
     is_calibrated = False
     blocked_counter = 0
@@ -146,9 +102,9 @@ def main():
     calibration_cooldown = 0
 
     while True:
-        frame = get_usb_camera_frame(dev, ep_in)
-        if frame is None:
-            print("Error: Failed to grab frame from the USB device.")
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            print("Error: Failed to grab frame from the camera device.")
             break
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -214,6 +170,7 @@ def main():
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
+    cap.release()
     cv2.destroyAllWindows()
 
 if __name__ == "__main__":
