@@ -3,10 +3,35 @@ import numpy as np
 import usb.core
 import usb.util
 
+import os
+
 def initialize_usb_camera():
-    print("Microsoft VX-1000 arayüzleri taranıyor...")
-    dev = usb.core.find(idVendor=0x045e)
+    print("Termux-USB yetkisiyle kamera açılıyor...")
     
+    # termux-usb ile sağlanan dosya tanımlayıcısını çevre değişkeninden al
+    fd_str = os.environ.get('TERMUX_USB_FD')
+    
+    if fd_str:
+        try:
+            fd = int(fd_str)
+            import usb.backend.libusb1
+            # Doğrudan açık dosya tanımlayıcısı ile libusb handle'ı oluştur
+            dev = usb.core.find(idVendor=0x045e, custom_open=lambda dev: fd)
+            if dev:
+                print("USB cihazı termux-usb FD üzerinden başarıyla bağlandı!")
+                cfg = dev.get_active_configuration()
+                intf = cfg[(0, 0)]
+                ep_in = None
+                for ep in intf:
+                    if usb.util.endpoint_direction(ep.bEndpointAddress) == usb.util.ENDPOINT_IN:
+                        ep_in = ep
+                        break
+                return dev, ep_in
+        except Exception as e:
+            print(f"FD bağlantı hatası: {e}")
+
+    # Standart yöntem (Yedek)
+    dev = usb.core.find(idVendor=0x045e)
     if dev is None:
         return None, None
 
@@ -22,16 +47,11 @@ def initialize_usb_camera():
         pass
         
     cfg = dev.get_active_configuration()
-    
-    # Tüm arayüzleri ve endpoint'leri tarayarak doğru veri kanalını bulalım
+    intf = cfg[(0, 0)]
     ep_in = None
-    for intf in cfg:
-        for ep in intf:
-            if usb.util.endpoint_direction(ep.bEndpointAddress) == usb.util.ENDPOINT_IN:
-                # Isochronous veya Bulk endpoint kontrolü
-                ep_in = ep
-                break
-        if ep_in is not None:
+    for ep in intf:
+        if usb.util.endpoint_direction(ep.bEndpointAddress) == usb.util.ENDPOINT_IN:
+            ep_in = ep
             break
 
     return dev, ep_in
