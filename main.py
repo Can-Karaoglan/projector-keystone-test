@@ -4,20 +4,9 @@ import usb.core
 import usb.util
 
 def initialize_usb_camera():
-    print("Sistemdeki USB cihazları taranıyor...")
-    all_devs = list(usb.core.find(find_all=True))
+    print("Microsoft VX-1000 arayüzleri taranıyor...")
+    dev = usb.core.find(idVendor=0x045e)
     
-    dev = None
-    for d in all_devs:
-        print(f"Bulunan Cihaz -> Vendor ID: {hex(d.idVendor)}, Product ID: {hex(d.idProduct)}")
-        if d.idVendor == 0x045e:  # Microsoft VX-1000
-            dev = d
-            break
-            
-    # Eğer özel ID bulunamazsa ilk bulunan USB kamerayı dene
-    if dev is None and len(all_devs) > 0:
-        dev = all_devs[0]
-
     if dev is None:
         return None, None
 
@@ -32,17 +21,17 @@ def initialize_usb_camera():
     except Exception:
         pass
         
-    try:
-        cfg = dev.get_active_configuration()
-    except Exception:
-        cfg = dev[0]
-        
-    intf = cfg[(0, 0)]
-
+    cfg = dev.get_active_configuration()
+    
+    # Tüm arayüzleri ve endpoint'leri tarayarak doğru veri kanalını bulalım
     ep_in = None
-    for ep in intf:
-        if usb.util.endpoint_direction(ep.bEndpointAddress) == usb.util.ENDPOINT_IN:
-            ep_in = ep
+    for intf in cfg:
+        for ep in intf:
+            if usb.util.endpoint_direction(ep.bEndpointAddress) == usb.util.ENDPOINT_IN:
+                # Isochronous veya Bulk endpoint kontrolü
+                ep_in = ep
+                break
+        if ep_in is not None:
             break
 
     return dev, ep_in
