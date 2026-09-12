@@ -6,9 +6,6 @@ import usb.util
 def initialize_usb_camera():
     dev = usb.core.find(idVendor=0x045e)
     if dev is None:
-        dev = usb.core.find(find_all=False)
-        
-    if dev is None:
         return None, None
 
     try:
@@ -17,14 +14,16 @@ def initialize_usb_camera():
     except Exception:
         pass
 
-    # Android tarafında konfigürasyon zaten yapılmış olabileceğinden 
-    # hata almamak için try-except içine alıyoruz
     try:
         dev.set_configuration()
-    except usb.core.USBError:
-        pass # Zaten aktifse hatayı yok say
-
-    cfg = dev.get_active_configuration()
+    except Exception:
+        pass
+        
+    try:
+        cfg = dev.get_active_configuration()
+    except Exception:
+        cfg = dev[0]
+        
     intf = cfg[(0, 0)]
 
     ep_in = None
