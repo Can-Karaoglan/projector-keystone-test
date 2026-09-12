@@ -4,7 +4,20 @@ import usb.core
 import usb.util
 
 def initialize_usb_camera():
-    dev = usb.core.find(idVendor=0x045e)
+    print("Sistemdeki USB cihazları taranıyor...")
+    all_devs = list(usb.core.find(find_all=True))
+    
+    dev = None
+    for d in all_devs:
+        print(f"Bulunan Cihaz -> Vendor ID: {hex(d.idVendor)}, Product ID: {hex(d.idProduct)}")
+        if d.idVendor == 0x045e:  # Microsoft VX-1000
+            dev = d
+            break
+            
+    # Eğer özel ID bulunamazsa ilk bulunan USB kamerayı dene
+    if dev is None and len(all_devs) > 0:
+        dev = all_devs[0]
+
     if dev is None:
         return None, None
 
