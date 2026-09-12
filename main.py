@@ -4,11 +4,7 @@ import usb.core
 import usb.util
 
 def initialize_usb_camera():
-    """
-    Finds a UVC-compliant USB camera using PyUSB, detaches kernel drivers if active,
-    and sets up the device and its input endpoint for raw packet reading.
-    """
-    dev = usb.core.find(idVendor=0x045e) # Microsoft VX-1000 Vendor ID
+    dev = usb.core.find(idVendor=0x045e)
     if dev is None:
         dev = usb.core.find(find_all=False)
         
@@ -21,7 +17,13 @@ def initialize_usb_camera():
     except Exception:
         pass
 
-    dev.set_configuration()
+    # Android tarafında konfigürasyon zaten yapılmış olabileceğinden 
+    # hata almamak için try-except içine alıyoruz
+    try:
+        dev.set_configuration()
+    except usb.core.USBError:
+        pass # Zaten aktifse hatayı yok say
+
     cfg = dev.get_active_configuration()
     intf = cfg[(0, 0)]
 
