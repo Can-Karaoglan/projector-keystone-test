@@ -55,7 +55,9 @@ def get_usb_camera_frame(dev, ep_in):
     buffer = bytearray()
     while True:
         try:
-            data = dev.read(ep_in.bEndpointAddress, ep_in.wMaxPacketSize, timeout=100)
+            # Okuma boyutunu endpoint'e göre güvenli alıyoruz
+            packet_size = max(ep_in.wMaxPacketSize, 1024)
+            data = dev.read(ep_in.bEndpointAddress, packet_size, timeout=500)
             buffer.extend(data)
             
             start = buffer.find(b'\xff\xd8')
@@ -69,8 +71,12 @@ def get_usb_camera_frame(dev, ep_in):
                 frame = cv2.imdecode(frame_arr, cv2.IMREAD_COLOR)
                 if frame is not None:
                     return frame
-        except usb.core.USBError:
-            break
+        except usb.core.USBError as e:
+            # Zaman aşımı veya geçici okuma hatalarında döngüyü kırmadan devam et
+            if e.errno == 110: # ETIMEDOUT
+                continue
+            else:
+                break
     return None
 
 def draw_grid_and_markers(frame, h, w, show_full_grid=True):
