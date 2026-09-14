@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import usb.core
 import usb.util
+import usb.backend.libusb1
 
 def initialize_usb_camera():
     """Initializes the Microsoft VX-1000 webcam via Termux-USB FD or direct fallback."""
@@ -11,7 +12,6 @@ def initialize_usb_camera():
     if fd_str:
         try:
             fd = int(fd_str)
-            import usb.backend.libusb1
             dev = usb.core.find(idVendor=0x045e, custom_open=lambda dev: fd)
             if dev:
                 cfg = dev.get_active_configuration()
@@ -151,7 +151,6 @@ def main():
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         h, w = gray.shape
 
-        # Check if camera view is obstructed or completely dark
         avg_brightness = np.mean(gray)
         if avg_brightness < 10:
             blocked_counter += 1
@@ -169,7 +168,6 @@ def main():
         else:
             blocked_counter = 0
 
-        # Detect motion to avoid continuous heavy processing
         motion_detected = False
         if prev_gray is not None:
             diff = cv2.absdiff(prev_gray, gray)
@@ -179,7 +177,6 @@ def main():
         
         prev_gray = gray.copy()
 
-        # Only calibrate when motion is detected, initial state is missing, or matrix is lost
         if not is_calibrated or motion_detected or cached_perspective_matrix is None:
             if calibration_cooldown == 0:
                 src_pts = detect_calibration_markers(frame)
@@ -194,15 +191,13 @@ def main():
                     
                     cached_perspective_matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
                     is_calibrated = True
-                    calibration_cooldown = 45 # Cooldown to keep CPU usage low
+                    calibration_cooldown = 45
             else:
                 calibration_cooldown -= 1
 
-        # Render subtle alignment markers conditionally during calibration search
         show_markers_flag = not is_calibrated or motion_detected
         draw_non_intrusive_markers(frame, h, w, show_grid=show_markers_flag)
 
-        # Apply perspective transformation only if valid matrix exists
         if cached_perspective_matrix is not None:
             warped = cv2.warpPerspective(frame, cached_perspective_matrix, (w, h))
             cv2.imshow("Automated Keystone Correction System", warped)
