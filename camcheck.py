@@ -9,17 +9,16 @@ if dev is None:
 else:
     print("Success: Camera hardware detected.")
     
-    try:
-        # Try to get device configuration without calling active driver check first
-        cfg = dev.get_active_configuration()
-        print(f"Active configuration: {cfg}")
-    except Exception as e:
-        print(f"Direct configuration access blocked: {e}")
-        
-        # Alternative method using custom open / backend hook if available
-        try:
-            # Re-initialize device handle manually
-            if hasattr(dev, '_ctx') and dev._ctx:
-                print("USB context exists, trying direct interface claim...")
-        except Exception as inner_e:
-            print(f"Bypass failed: {inner_e}")
+    # Iterate through configurations and interfaces to claim endpoints manually
+    for cfg in dev:
+        print(f"Configuration value: {cfg.bConfigurationValue}")
+        for intf in cfg:
+            print(f"Interface: {intf.bInterfaceNumber}, Alternate: {intf.bAlternateSetting}")
+            try:
+                # Attempt to claim interface directly without kernel detach
+                if dev.is_kernel_driver_active(intf.bInterfaceNumber):
+                    dev.detach_kernel_driver(intf.bInterfaceNumber)
+                usb.util.claim_interface(dev, intf.bInterfaceNumber)
+                print(f"Successfully claimed interface {intf.bInterfaceNumber}!")
+            except Exception as e:
+                print(f"Failed to claim interface {intf.bInterfaceNumber}: {e}")
