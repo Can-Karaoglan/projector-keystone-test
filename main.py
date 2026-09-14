@@ -6,13 +6,14 @@ import usb.util
 import usb.backend.libusb1
 
 def initialize_usb_camera():
-    """Initializes the Microsoft VX-1000 webcam via Termux-USB FD or direct fallback."""
+    """Initializes the Microsoft VX-1000 webcam via Termux-USB FD with libusb1 backend."""
     fd_str = os.environ.get('TERMUX_USB_FD')
+    backend = usb.backend.libusb1.get_backend()
     
     if fd_str:
         try:
             fd = int(fd_str)
-            dev = usb.core.find(idVendor=0x045e, custom_open=lambda dev: fd)
+            dev = usb.core.find(idVendor=0x045e, custom_open=lambda dev: fd, backend=backend)
             if dev:
                 cfg = dev.get_active_configuration()
                 intf = cfg[(0, 0)]
@@ -22,11 +23,11 @@ def initialize_usb_camera():
                         ep_in = ep
                         break
                 return dev, ep_in
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"FD Initialization Error: {e}")
 
-    # Standard fallback routine
-    dev = usb.core.find(idVendor=0x045e)
+    # Standard fallback routine with backend specification
+    dev = usb.core.find(idVendor=0x045e, backend=backend)
     if dev is None:
         return None, None
 
@@ -88,12 +89,10 @@ def draw_non_intrusive_markers(frame, h, w, show_grid=False):
             cv2.line(frame, (0, y), (w, y), grid_color, 1)
 
     marker_color = (0, 255, 0)
-    # Corner markers
     cv2.circle(frame, (30, 30), 6, marker_color, -1)
     cv2.circle(frame, (w - 30, 30), 6, marker_color, -1)
     cv2.circle(frame, (30, h - 30), 6, marker_color, -1)
     cv2.circle(frame, (w - 30, h - 30), 6, marker_color, -1)
-    # Center reference marker
     cv2.circle(frame, (w // 2, h // 2), 8, (0, 0, 255), -1)
 
 def detect_calibration_markers(frame):
@@ -207,7 +206,7 @@ def main():
             cv2.addWeighted(overlay, 0.5, frame, 0.5, 0, frame)
             cv2.putText(frame, "NOTIFICATION: Searching for calibration markers and alignment area...", 
                         (15, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
-            cv2.imshow("Automated Keystone Correction System", frame)
+            cv2.imshow("Automated Keystone CorrectionSystem", frame)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
