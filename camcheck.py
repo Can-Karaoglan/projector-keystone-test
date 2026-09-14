@@ -1,11 +1,14 @@
 import usb.core
+import usb.util
 
 dev = usb.core.find(idVendor=0x045e, idProduct=0x00f7)
+
 if dev is None:
-    print("Device not found")
+    print("Can't find any camera.")
 else:
+    print("Camera found:", dev)
     try:
-        active = dev.is_kernel_driver_active(0)
-        print("Kernel server active:", active)
+        dev.set_configuration()
+        print("Configuration successfully picked!")
     except Exception as e:
-        print("An error occurred:", e)
+        print("Connection error (Access Denied):", e)
