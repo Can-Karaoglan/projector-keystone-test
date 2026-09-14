@@ -1,24 +1,19 @@
+import os
 import cv2
 import numpy as np
 import usb.core
 import usb.util
 
-import os
-
 def initialize_usb_camera():
-    print("Termux-USB yetkisiyle kamera açılıyor...")
-    
-    # termux-usb ile sağlanan dosya tanımlayıcısını çevre değişkeninden al
+    """Initializes the Microsoft VX-1000 webcam via Termux-USB FD or direct fallback."""
     fd_str = os.environ.get('TERMUX_USB_FD')
     
     if fd_str:
         try:
             fd = int(fd_str)
             import usb.backend.libusb1
-            # Doğrudan açık dosya tanımlayıcısı ile libusb handle'ı oluştur
             dev = usb.core.find(idVendor=0x045e, custom_open=lambda dev: fd)
             if dev:
-                print("USB cihazı termux-usb FD üzerinden başarıyla bağlandı!")
                 cfg = dev.get_active_configuration()
                 intf = cfg[(0, 0)]
                 ep_in = None
@@ -27,10 +22,10 @@ def initialize_usb_camera():
                         ep_in = ep
                         break
                 return dev, ep_in
-        except Exception as e:
-            print(f"FD bağlantı hatası: {e}")
+        except Exception:
+            pass
 
-    # Standart yöntem (Yedek)
+    # Standard fallback routine
     dev = usb.core.find(idVendor=0x045e)
     if dev is None:
         return None, None
@@ -57,14 +52,10 @@ def initialize_usb_camera():
     return dev, ep_in
 
 def get_usb_camera_frame(dev, ep_in):
-    """
-    Reads raw USB packets, strips UVC headers, isolates MJPEG frames,
-    and decodes them into OpenCV-compatible numpy arrays.
-    """
+    """Reads raw USB packets, isolates MJPEG frames, and decodes them."""
     buffer = bytearray()
     while True:
         try:
-            # Okuma boyutunu endpoint'e göre güvenli alıyoruz
             packet_size = max(ep_in.wMaxPacketSize, 1024)
             data = dev.read(ep_in.bEndpointAddress, packet_size, timeout=500)
             buffer.extend(data)
@@ -81,43 +72,34 @@ def get_usb_camera_frame(dev, ep_in):
                 if frame is not None:
                     return frame
         except usb.core.USBError as e:
-            # Zaman aşımı veya geçici okuma hatalarında döngüyü kırmadan devam et
             if e.errno == 110: # ETIMEDOUT
                 continue
             else:
                 break
     return None
 
-def draw_grid_and_markers(frame, h, w, show_full_grid=True):
-    """
-    Draws non-intrusive calibration shapes, corners, center markers, 
-    and a subtle grid pattern onto the frame without disrupting media playback.
-    """
-    if show_full_grid:
-        grid_color = (40, 120, 40)
-        for x in range(0, w, 80):
+def draw_non_intrusive_markers(frame, h, w, show_grid=False):
+    """Draws subtle calibration shapes and grid pattern without disrupting media."""
+    if show_grid:
+        grid_color = (30, 90, 30)
+        for x in range(0, w, 100):
             cv2.line(frame, (x, 0), (x, h), grid_color, 1)
-        for y in range(0, h, 60):
+        for y in range(0, h, 80):
             cv2.line(frame, (0, y), (w, y), grid_color, 1)
 
-    corner_color = (0, 255, 0)
-    cv2.circle(frame, (40, 40), 8, corner_color, -1)
-    cv2.circle(frame, (w - 40, 40), 8, corner_color, -1)
-    cv2.circle(frame, (40, h - 40), 8, corner_color, -1)
-    cv2.circle(frame, (w - 40, h - 40), 8, corner_color, -1)
-
-    cv2.circle(frame, (w // 2, 40), 6, (255, 0, 0), -1)
-    cv2.circle(frame, (w // 2, h - 40), 6, (255, 0, 0), -1)
-    cv2.circle(frame, (40, h // 2), 6, (255, 0, 0), -1)
-    cv2.circle(frame, (w - 40, h // 2), 6, (255, 0, 0), -1)
-    cv2.circle(frame, (w // 2, h // 2), 10, (0, 0, 255), -1)
+    marker_color = (0, 255, 0)
+    # Corner markers
+    cv2.circle(frame, (30, 30), 6, marker_color, -1)
+    cv2.circle(frame, (w - 30, 30), 6, marker_color, -1)
+    cv2.circle(frame, (30, h - 30), 6, marker_color, -1)
+    cv2.circle(frame, (w - 30, h - 30), 6, marker_color, -1)
+    # Center reference marker
+    cv2.circle(frame, (w // 2, h // 2), 8, (0, 0, 255), -1)
 
 def detect_calibration_markers(frame):
-    """
-    Detects the green calibration corner markers using HSV filtering and contour analysis.
-    """
+    """Detects green calibration markers using HSV filtering and contour analysis."""
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    lower_green = np.array([35, 50, 50])
+    lower_green = np.array([35, 40, 40])
     upper_green = np.array([85, 255, 255])
     
     mask = cv2.inRange(hsv, lower_green, upper_green)
@@ -126,7 +108,7 @@ def detect_calibration_markers(frame):
     points = []
     for cnt in contours:
         area = cv2.contourArea(cnt)
-        if area > 15:
+        if area > 12:
             M = cv2.moments(cnt)
             if M["m00"] > 0:
                 cX = int(M["m10"] / M["m00"])
@@ -148,15 +130,11 @@ def detect_calibration_markers(frame):
     return None
 
 def main():
-    print("Searching for available USB camera devices via PyUSB...")
     dev, ep_in = initialize_usb_camera()
     
     if dev is None or ep_in is None:
-        print("NOTIFICATION: Camera could not be detected!")
-        print("Please ensure the camera is properly connected, libusb is installed, and Termux has USB permissions.")
+        print("CRITICAL ERROR: USB camera initialization failed.")
         return
-
-    print("USB Camera successfully initialized via raw PyUSB layer.")
 
     is_calibrated = False
     blocked_counter = 0
@@ -168,58 +146,63 @@ def main():
     while True:
         frame = get_usb_camera_frame(dev, ep_in)
         if frame is None:
-            print("Error: Failed to grab frame from the USB device.")
             break
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         h, w = gray.shape
 
+        # Check if camera view is obstructed or completely dark
         avg_brightness = np.mean(gray)
-        if avg_brightness < 12:
+        if avg_brightness < 10:
             blocked_counter += 1
-            if blocked_counter > 20:
+            if blocked_counter > 15:
                 overlay = frame.copy()
                 cv2.rectangle(overlay, (0, h - 50), (w, h), (0, 0, 0), -1)
                 cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
                 cv2.putText(frame, "NOTIFICATION: Projector screen not detected! Remove obstruction or realign camera.", 
-                            (15, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
-            
-            cv2.imshow("Automated Keystone Correction System", frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-            continue
+                            (15, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                
+                cv2.imshow("Automated Keystone Correction System", frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+                continue
         else:
             blocked_counter = 0
 
+        # Detect motion to avoid continuous heavy processing
         motion_detected = False
         if prev_gray is not None:
             diff = cv2.absdiff(prev_gray, gray)
-            non_zero_count = np.count_nonzero(diff > 30)
-            if non_zero_count > (w * h * 0.03):
+            non_zero_count = np.count_nonzero(diff > 25)
+            if non_zero_count > (w * h * 0.025):
                 motion_detected = True
         
         prev_gray = gray.copy()
 
+        # Only calibrate when motion is detected, initial state is missing, or matrix is lost
         if not is_calibrated or motion_detected or cached_perspective_matrix is None:
             if calibration_cooldown == 0:
                 src_pts = detect_calibration_markers(frame)
                 if src_pts is not None:
                     if dst_pts is None:
                         dst_pts = np.array([
-                            [40, 40],
-                            [w - 40, 40],
-                            [40, h - 40],
-                            [w - 40, h - 40]
+                            [30, 30],
+                            [w - 30, 30],
+                            [30, h - 30],
+                            [w - 30, h - 30]
                         ], dtype="float32")
                     
                     cached_perspective_matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
                     is_calibrated = True
-                    calibration_cooldown = 30
+                    calibration_cooldown = 45 # Cooldown to keep CPU usage low
             else:
                 calibration_cooldown -= 1
 
-        draw_grid_and_markers(frame, h, w, show_full_grid=True)
+        # Render subtle alignment markers conditionally during calibration search
+        show_markers_flag = not is_calibrated or motion_detected
+        draw_non_intrusive_markers(frame, h, w, show_grid=show_markers_flag)
 
+        # Apply perspective transformation only if valid matrix exists
         if cached_perspective_matrix is not None:
             warped = cv2.warpPerspective(frame, cached_perspective_matrix, (w, h))
             cv2.imshow("Automated Keystone Correction System", warped)
@@ -227,8 +210,8 @@ def main():
             overlay = frame.copy()
             cv2.rectangle(overlay, (0, 0), (w, 40), (0, 0, 0), -1)
             cv2.addWeighted(overlay, 0.5, frame, 0.5, 0, frame)
-            cv2.putText(frame, "NOTIFICATION: Initializing grid alignment... Searching for projection area.", 
-                        (15, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+            cv2.putText(frame, "NOTIFICATION: Searching for calibration markers and alignment area...", 
+                        (15, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
             cv2.imshow("Automated Keystone Correction System", frame)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
